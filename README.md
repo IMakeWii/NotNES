@@ -1,11 +1,5 @@
 # NotNES
-An NES emulator for the Wii, written in C++.
-
-# Where's The Emulator?
-Not yet, buddy. I just wanna get PPU emulation working first.
-
-# How Is It As Of Now?
-It's a mess, but it works.
+A W.I.P. NES emulator for the Wii, written in C++.
 
 # Credits
 CPU Emulator: https://github.com/gianlucag/mos6502
