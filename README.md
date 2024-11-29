@@ -10,6 +10,16 @@ A W.I.P. NES emulator for the Wii, written in C++.
 
 - Implement APU emulation using asndlib or other library
 
+# Compiling
+Compile using `make`;
+
+# Compiling Requirements
+OS: Linux, Windows, or MacOS
+
+Libraries: libfat
+
+Tools: make
+
 # Credits
 CPU Emulator: https://github.com/gianlucag/mos6502
 
