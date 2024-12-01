@@ -15,9 +15,12 @@
 #include "mos6502.h"
 
 #define DBGMODE 0
+#define PRINTRW 0
+#define PRINTVB 0
+#define PRINTPPURW 0
 
-std::vector<uint8_t> AddressSpace(65536);
-std::vector<uint8_t> PPUAddressSpace(16384);
+std::vector<uint8_t> AddressSpace;
+std::vector<uint8_t> PPUAddressSpace;
 uint16_t prgstartlocation;
 std::vector<uint8_t> prgromData;
 int prgRomSize;
@@ -118,11 +121,13 @@ static lwp_t fb_handle = (lwp_t)nullptr;
 
 // Read function for the emulator
 uint8_t Read(uint16_t address) {
-    if(DBGMODE) printf("Read: 0x%04X\n", address);
+    if(PRINTRW) printf("Read: 0x%04X\n", address);
     // I know we could write to memory. Screw that.
-    if(address == 0x2002) return ppuStatusRegister;
-    ppuStatusRegister &= ~(1 << 7);
-    return AddressSpace[address];
+    if(address == 0x2002) {
+         uint8_t ppuTempSRegister = ppuStatusRegister;
+         ppuStatusRegister &= ~(1 << 7);
+         return ppuTempSRegister;
+    } else return AddressSpace[address];
 }
 
 u32 CvtRGB(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2, uint8_t b2) {
@@ -144,7 +149,7 @@ u32 CvtRGB(uint8_t r1, uint8_t g1, uint8_t b1, uint8_t r2, uint8_t g2, uint8_t b
 
 // Write function for the emulator
 void Write(uint16_t address, uint8_t value) {
-    if(DBGMODE) printf("Write: 0x%04X, 0x%02X\n", address, value);
+    if(PRINTRW) printf("Write: 0x%04X = 0x%02X\n", address, value);
     if(address == 0x2006) {
         if(whichVRAMAddrPart == 0) {
             ppuVRAMAddressP1 = value;
@@ -160,13 +165,22 @@ void Write(uint16_t address, uint8_t value) {
         PPUAddressSpace[ppuVRAMAddress] = value;
         if(AddressSpace[0x2000] & (1 << 2)) ppuVRAMAddress += 32;
         else ppuVRAMAddress += 1;
-        v = (0 * 320) + (0 >> 1);
-        for (rows = 0; rows < 640; rows++) {
-		for (cols = 0; cols < 480; cols++)
-			if(curbuf == 0) axfb[v + cols] = CvtRGB(palette[PPUAddressSpace[0x3F00]][0], palette[PPUAddressSpace[0x3F00]][1], palette[PPUAddressSpace[0x3F00]][2], palette[PPUAddressSpace[0x3F00]][0], palette[PPUAddressSpace[0x3F00]][1], palette[PPUAddressSpace[0x3F00]][2]);
-                        else bxfb[v + cols] = CvtRGB(palette[PPUAddressSpace[0x3F00]][0], palette[PPUAddressSpace[0x3F00]][1], palette[PPUAddressSpace[0x3F00]][2], palette[PPUAddressSpace[0x3F00]][0], palette[PPUAddressSpace[0x3F00]][1], palette[PPUAddressSpace[0x3F00]][2]);
-		v += 320;
+        u32 color = CvtRGB(palette[PPUAddressSpace[0x3F00]][0], palette[PPUAddressSpace[0x3F00]][1], palette[PPUAddressSpace[0x3F00]][2], palette[PPUAddressSpace[0x3F00]][0], palette[PPUAddressSpace[0x3F00]][1], palette[PPUAddressSpace[0x3F00]][2]);
+        int width = rmode->fbWidth;  // Width of the framebuffer in pixels
+        int height = rmode->xfbHeight;  // Height of the framebuffer in pixels
+        int i, j;
+    
+        for (i = 0; i < height; i++) {
+            for (j = 0; j < width; j++) {
+                // Calculate the framebuffer index for pixel (i, j)
+                int pixel_index = (i * width) + j;
+    
+                // Set the pixel color
+                if(curbuf == 0) axfb[pixel_index] = color;
+                else bxfb[pixel_index] = color;
+            }
         }
+        printf("Ready to draw\n");
         readyforFBDraw = 1;
     }
     AddressSpace[address] = value;
@@ -188,7 +202,7 @@ void initconsole() {
 // Framebook- I mean, framebuffer render thread
 void *fbrenderthread(void *arg) {
     while(1) {
-        if(readyforFBDraw == 1) {
+        if(readyforFBDraw == 1 && !DBGMODE) {
             // Double buffering. Smooth, not crap.
             // Framebuffer A
             if(curbuf == 0) VIDEO_SetNextFramebuffer(axfb);
@@ -200,6 +214,9 @@ void *fbrenderthread(void *arg) {
             // Swap framebuffers for double buffering
             if(curbuf == 0) curbuf = 1;
             else if(curbuf == 1) curbuf = 0;
+        } else if(readyforFBDraw == 1 && DBGMODE) {
+            printf("Thread recieved message");
+            readyforFBDraw = 0;
         }
         WPAD_ScanPads();
         if(WPAD_ButtonsDown(0) & WPAD_BUTTON_HOME) exit(0);
@@ -210,14 +227,17 @@ void *fbrenderthread(void *arg) {
 }
 
 void initgraphics() {
-    axfb = (u32 *)MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
-    bxfb = (u32 *)MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
-    // Clear frame buffers
-    VIDEO_ClearFrameBuffer(rmode, axfb, COLOR_BLACK);
-    VIDEO_ClearFrameBuffer(rmode, bxfb, COLOR_BLACK);
-    VIDEO_SetNextFramebuffer(axfb);
-    VIDEO_Flush();
-    VIDEO_WaitVSync();
+    if(!DBGMODE) {
+        axfb = (u32 *)MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+        bxfb = (u32 *)MEM_K0_TO_K1(SYS_AllocateFramebuffer(rmode));
+        // Clear frame buffers
+        VIDEO_ClearFrameBuffer(rmode, axfb, COLOR_BLACK);
+        VIDEO_ClearFrameBuffer(rmode, bxfb, COLOR_BLACK);
+        VIDEO_SetNextFramebuffer(axfb);
+        VIDEO_Flush();
+        VIDEO_WaitVSync();
+    }
+    // Create framebuffer rendering thread with priority 50
     LWP_CreateThread(&fb_handle, fbrenderthread, nullptr, nullptr, 64*1024, 50);
     std::cout << "Initialized graphics.\n";
 }
@@ -246,7 +266,7 @@ std::vector<uint8_t> readfile(const std::string &filename) {
 
 void Start2A03Emulation() {
     printf("[--( Stage 3: Hardware Emulation )------------------------------------------]");
-    //initgraphics();
+    initgraphics();
     mos6502 cpu(Read, Write);
     cpu.Reset();
     struct timespec ts;
@@ -262,23 +282,27 @@ void Start2A03Emulation() {
         // Edit: Now I do.
         uint64_t cycleCount = 0;
         cpu.Run(1, cycleCount);
-        // printf("%llu\n", cycleCount);
         cyclecounter += cycleCount;
         // It's vblank'n time.
         // P.S. This is inefficient and inaccurate.
         // But it works, so shut up. 
-        if(cyclecounter >= 27360) {
+        if(cyclecounter >= 113) {
             isVBlank = 1;
             ppuStatusRegister |= (1 << 7);
             cyclecounter = 0;
-            if(DBGMODE) printf("VBlank flag on\n");
+            if(PRINTVB) printf("VBlank flag on\n");
+            if(AddressSpace[0x2000] & (1 << 7)) {
+                if(DBGMODE) printf("NMI triggered\n");
+                cpu.NMI();
+            }
         }
-        if(isVBlank == 1 && cyclecounter >= 2280) {
+        if(isVBlank == 1 && cyclecounter >= 2273) {
             isVBlank = 0;
             ppuStatusRegister &= ~(1 << 7);
             cyclecounter = 0;
-            if(DBGMODE) printf("VBlank flag off\n");
+            if(PRINTVB) printf("VBlank flag off\n");
         }
+        if(cycleCount <= 0) cycleCount = 1;
         ts.tv_nsec = (559*cycleCount); // 1.788908765653 MHz. ^_^
         nanosleep(&ts, nullptr);
     }
@@ -306,6 +330,10 @@ void InitEmulation() {
         printf("PRG ROM too big, cannot copy into address space.\n");
         while(1);
     }
+    AddressSpace.resize(0xFFFF + 1, 0);
+    PPUAddressSpace.resize(0x3FFF + 1, 0);
+    std::fill(AddressSpace.begin(), AddressSpace.end(), 0);
+    std::fill(PPUAddressSpace.begin(), PPUAddressSpace.end(), 0);
     // Insert the "totally non-pirated ROM of SMB2" into memory
     insert_at_location(AddressSpace, prgromData);
     Start2A03Emulation();
@@ -318,6 +346,7 @@ void LoadROM(const char* romPath, int skip, int getInfo) {
     if (skip) {
         printf("Skipping, as reset command has been sent.\n");
         InitEmulation();
+        return;
     }
 
     FILE* file = fopen(romPath, "rb");
@@ -348,20 +377,37 @@ void LoadROM(const char* romPath, int skip, int getInfo) {
         printf("Game has no battery\n");
     }
 
-    if (!getInfo) {
-        prgromData = std::vector<uint8_t>(prgRomSize);
-        fseek(file, 16, SEEK_SET);
-        fread(prgromData.data(), 1, prgRomSize, file);
-        InitEmulation();
-    }
+    printf("%d", prgRomSize);
 
-    fclose(file);
+    if (!getInfo) {
+        // Read the entire ROM file into a vector
+        fseek(file, 0, SEEK_END);
+        long fileSize = ftell(file);
+        rewind(file);
+
+        std::vector<uint8_t> romData(fileSize);
+        fread(romData.data(), 1, fileSize, file);
+        fclose(file);
+
+        // Extract PRG ROM
+        if (prgRomSize > 0 && fileSize >= 16 + prgRomSize) {
+            prgromData.assign(romData.begin() + 16, romData.begin() + 16 + prgRomSize);
+            printf("Successfully loaded PRG ROM data.\n");
+        } else {
+            printf("Error: PRG ROM size invalid or file too small.\n");
+            sleep(3);
+            exit(1);
+        }
+
+        InitEmulation();
+    } else {
+        fclose(file);
+    }
 }
 
 int main() {
     initconsole();
     printf("NotNES by IMakeWii\n");
-
     if (!fatInitDefault()) {
         printf("Failed to init libfat\n");
         sleep(3);
