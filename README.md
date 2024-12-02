@@ -1,17 +1,29 @@
 # NotNES
 A W.I.P. NES emulator for the Wii, written in C++.
 
-# TODO
-- Add basic ROM menu
+# Goals
+- [x] ROM loading
 
-- Finish PPU emulation
+- [x] Get CPU emulation setup and working
 
-- Implement pad emulation
+- [x] Implement basic PPU emulation
 
-- Implement APU emulation using asndlib or other library
+- [ ] Get proper framebuffer system
+
+- [ ] Add basic ROM menu
+
+- [ ] Finish PPU emulation
+
+- [ ] Implement pad emulation
+
+- [ ] Implement APU emulation using asndlib or other library
 
 # Compiling
-Compile using `make`;
+Compile using `make`.
+
+Clean using `make clean`.
+
+??? `make love` 
 
 # Compiling Requirements
 OS: Linux, Windows, or MacOS
